@@ -1,6 +1,8 @@
 #include <asm-generic/socket.h>
 #include <iostream>
 #include <cstring>
+#include <string>
+#include <unistd.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -10,47 +12,112 @@
 
 const int PORT = 8080;
 
+class SimpleServer {
+    private:
+        int file_descriptor, backlog;
+        struct sockaddr_in address;
+
+        struct ConnectionInfo {
+            int file_descriptor;
+            struct sockaddr_in address;
+        };
+
+    public:
+        SimpleServer(const char* ip_address, int port, int backlog) {
+            address.sin_port = htons(port);
+            address.sin_family = AF_INET;
+            inet_aton(ip_address, &address.sin_addr);
+        }
+
+        int init() {
+            // function creates new socket sets resue address and port flags and then binds the socket with provided ip address and port number.
+            // returns -1 if something went wrong else 0.
+            if((file_descriptor = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+                return -1;
+
+            int flag = 1;  // flag to set the options to true.
+            if(setsockopt(file_descriptor, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &flag, sizeof(flag)) == -1)
+                return -1;
+
+            if(bind(file_descriptor, (const struct sockaddr*)&address, sizeof(address)) == -1)
+                return -1;
+
+            return 0;
+        }
+
+        ConnectionInfo accept_connection() {
+            // function accepts connection form clients.
+            struct ConnectionInfo client;
+            int address_len = sizeof(client.address);
+            client.file_descriptor = accept(file_descriptor, (struct sockaddr*)&client.address, (socklen_t *)&address_len);
+            if(client.file_descriptor == -1)
+                std::cout<<"Failed to accept connection\n";
+            return client;
+        }
+
+        int receive(const ConnectionInfo &connection, int buffer_size = 1000){
+            // function to receive message from client.
+            print_connection_info(connection);
+
+            char buffer[buffer_size];
+            int bytes_received = 1;
+
+            char demo_msg[] = "hello ba ba boi";
+            while(bytes_received > 0){
+                bytes_received = recv(connection.file_descriptor, buffer, buffer_size, 0);
+                if(bytes_received == -1){
+                    std::cout<<"[ERROR] failed to receive message\n";
+                    return -1;
+                }
+                else if(bytes_received > 0){
+                    buffer[bytes_received] = 0;
+                }
+                else{
+                    buffer[buffer_size] = 0;
+                }
+                std::cout<<"[Bytes] "<<bytes_received<<std::endl;
+                std::cout<<"[Message] "<<buffer<<std::endl;
+
+                send_message(connection, demo_msg, sizeof(demo_msg));
+                break;
+            }
+            return 0;
+        }
+
+
+        void send_message(const ConnectionInfo &connection, const char* message, int message_len){
+            send(connection.file_descriptor, message, message_len, 0);
+        }
+
+        void print_connection_info(const ConnectionInfo &connection) {
+            // print the information related to connection
+            // prints only ip address for now.
+            std::cout<<"[Connection from] "<<inet_ntoa(connection.address.sin_addr)<<std::endl;
+        }
+
+        int serve () {
+            if(listen(file_descriptor, backlog) == -1){
+                return -1;
+            }
+
+            ConnectionInfo connection = accept_connection();
+            receive(connection);
+
+            close(connection.file_descriptor);
+            return 0;
+        }
+
+
+        ~SimpleServer (){
+            // closing all the resources.
+            close(file_descriptor);
+        }
+};
+
 int main(){
-    int server_fd = 0;
-    int set_flag = 1, unset_flag = 0;
-    struct sockaddr_in server_address;
-
-    if((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
-        return -1;
-    }
-    if((setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &set_flag, sizeof(set_flag))) == -1){
-        return -1;
-    }
-
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(PORT);
-    server_address.sin_addr.s_addr = 0;
-    memset(&server_address.sin_zero, 0, sizeof(server_address.sin_zero));
-
-    if(bind(server_fd, (struct sockaddr*)&server_address, sizeof(server_address)) == -1){
-        return -1;
-    }
-
-    int client_fd = 0;
-    struct sockaddr_in client_address;
-    int sin_size = sizeof(client_address);
-
-    if(listen(server_fd, 2) == -1){
-        return -1;
-    }
-
-    if((client_fd = accept(server_fd, (struct sockaddr*)&client_address, (socklen_t*)&sin_size)) == -1){
-        perror("accept");
-        exit(EXIT_FAILURE);
-        return -1;
-    }
-
-    char buffer[100];
-    if(recv(client_fd, (void *)buffer, 100, 0) == -1){
-        std::cout<<"fail\n";
-        return -1;
-    }
-    std::cout<<buffer<<std::endl;
+    SimpleServer server("127.0.0.1", 8080, 5);
+    server.init();
+    server.serve();
 
     return 0;
 }

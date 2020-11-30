@@ -2,15 +2,16 @@ HEADER_DIR = include/
 SRC_DIR = src/
 INCS = -I$(HEADER_DIR)
 
-build: main.o server.o
-	g++ main.o server.o -o server.out
+build: simple_server
 
-main.o: main.cpp $(HEADER_DIR)server.hpp
+simple_server: main.o
+	g++ main.o server.o -o simple_server
+
+main.o: main.cpp server.o
 	g++ -c main.cpp $(INCS)
 
-server.o: $(HEADER_DIR)server.hpp
+server.o: $(SRC_DIR)server.cpp $(HEADER_DIR)server.hpp
 	g++ -c $(SRC_DIR)server.cpp $(INCS)
 
 clean:
 	rm *.o
-	rm server.out

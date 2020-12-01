@@ -8,7 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include "server.hpp"
+#include "../include/server.hpp"
 
 SimpleServer::SimpleServer(const char* ip_address, int port, int backlog) {
     // server consturctor initalizes only address structure.
@@ -54,45 +54,81 @@ void SimpleServer::send_message(const ConnectionInfo &connection, const char* me
     send(connection.file_descriptor, message, message_len, 0);
 }
 
-int SimpleServer::receive(const ConnectionInfo &connection, int buffer_size = 1000){
-    // function to receive message from client.
-    // TODO: accept message according to http message format.
-    print_connection_info(connection);
 
-    char buffer[buffer_size];
-    int bytes_received = 1;
+int SimpleServer::process_GET(const ConnectionInfo &connection, const char* request_header, int header_len){
+    // function to process get request.
 
-    char demo_msg[] = "hello ba ba boi";
-    while(bytes_received > 0){
-        bytes_received = recv(connection.file_descriptor, buffer, buffer_size, 0);
-        if(bytes_received == -1){
-            printf("[ERROR] failed to receive message\n");
-            return -1;
-        }
-        else if(bytes_received > 0){
-            buffer[bytes_received] = 0;
-        }
-        else{
-            buffer[buffer_size] = 0;
-        }
-        printf("[Bytes] %d\n", bytes_received);
-        printf("[Message] %s\n", buffer);
-        SimpleServer::hex_dump(buffer, bytes_received);
-        send_message(connection, demo_msg, sizeof(demo_msg));
-        break;
-    }
+    char response[] = "HTTP/1.0 200 OK\r\n"
+        "Server: Simple server\r\n"
+        "Content-Length: 11\r\n"
+        "\r\n"
+        "Hello World";
+    send_message(connection, response, strlen(response));
     return 0;
 }
 
+int SimpleServer::process_request(const ConnectionInfo &connection, int buffer_size = 1024){
+    // function to process request form client.
+    // NOTE: default buffer size is 1KB.
+
+    // TODO: accepts request body and process post request also.
+    // Receive the header for request.
+    // buffer is used to recive data over the network.
+    char header[8000], buffer[buffer_size];
+    char* body = NULL;
+
+    // recv request header.
+
+    int header_len = 0, bytes_recvd = 0;
+    bool cont_recv = true;
+
+    while(cont_recv){
+        bytes_recvd  = recv(connection.file_descriptor, buffer, buffer_size, 0);
+        if(bytes_recvd < 0){
+            // something went wrong while reciving bytes
+            printf("failed to recive packet");
+            return -1;
+        }
+        else if(bytes_recvd == 0){
+            // EOF file reached or connection is closed by client.
+            return 0;
+        }
+        // add terminating symbol at the end of buffer.
+        buffer[bytes_recvd] = 0;
+
+        for(int i = 0; i < bytes_recvd; i++){
+            header[header_len++] = buffer[i];
+
+            if(header_len >4 && !strcmp(header+header_len-4, "\r\n\r\n")){
+                cont_recv = false;
+                break;
+            }
+        }
+    }
+
+    header[header_len] = 0;
+    printf("%s", header);
+    process_GET(connection, header, header_len);
+
+    if(body != NULL){
+        // delete body if the request had a body.
+        delete [] body;
+    }
+
+    return 0;
+}
 
 int SimpleServer::serve() {
     if(listen(file_descriptor, backlog) == -1){
         return -1;
     }
 
-    ConnectionInfo connection = accept_connection();
-    receive(connection, 1000);
-    close(connection.file_descriptor);
+    ConnectionInfo connection;
+    while(true){
+        connection = accept_connection();
+        process_request(connection);
+        close(connection.file_descriptor);
+    }
     return 0;
 }
 

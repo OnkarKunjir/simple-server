@@ -4,6 +4,9 @@ INCS = -I$(HEADER_DIR)
 
 build: simple_server
 
+run: build
+	./simple_server
+
 simple_server: main.o
 	g++ main.o server.o -o simple_server
 

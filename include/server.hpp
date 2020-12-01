@@ -12,7 +12,8 @@ class SimpleServer {
         struct sockaddr_in address;
 
         ConnectionInfo accept_connection();
-        int receive(const ConnectionInfo &connection, int buffer_size);
+        int process_GET(const ConnectionInfo &connection, const char* request_header, int header_len);
+        int process_request(const ConnectionInfo &connection, int buffer_size);
         void send_message(const ConnectionInfo &connection, const char* message, int message_len);
         void print_connection_info(const ConnectionInfo &connection);
 

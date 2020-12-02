@@ -1,7 +1,10 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 #include <unistd.h>
+#include <iostream>
+#include <fstream>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -9,6 +12,7 @@
 #include <arpa/inet.h>
 
 #include "../include/server.hpp"
+#include "../include/utils.hpp"
 
 SimpleServer::SimpleServer(const char* ip_address, int port, int backlog) {
     // server consturctor initalizes only address structure.
@@ -51,19 +55,61 @@ ConnectionInfo SimpleServer::accept_connection() {
 
 void SimpleServer::send_message(const ConnectionInfo &connection, const char* message, int message_len){
     // function to send whole message.
-    send(connection.file_descriptor, message, message_len, 0);
+    int bytes_sent = 0, start = 0;
+    while(true){
+        bytes_sent = send(connection.file_descriptor, message + start, message_len, 0);
+        if(bytes_sent < 0){
+            printf("Something went wrong while sending data\n");
+            break;
+        }
+        start += bytes_sent;
+        message_len -= bytes_sent;
+        if(message_len == 0){
+            // whole message is sent
+            break;
+        }
+    }
 }
 
 
 int SimpleServer::process_GET(const ConnectionInfo &connection, const char* request_header, int header_len){
     // function to process get request.
 
-    char response[] = "HTTP/1.0 200 OK\r\n"
-        "Server: Simple server\r\n"
-        "Content-Length: 11\r\n"
-        "\r\n"
-        "Hello World";
-    send_message(connection, response, strlen(response));
+    char response_body[] = "Hello World";
+
+    Header parsed_header = parse_header(request_header, header_len);
+
+    // generate response.
+    Header response_header;
+    response_header.version = "HTTP/1.0";
+
+    std::string file_path = "demo.html";
+    std::fstream requested_file(file_path.c_str(), std::fstream::in | std::fstream::binary);
+
+
+    if(requested_file.is_open()){
+        response_header.status = 200;
+        response_header.msg = "OK";
+
+        requested_file.seekg(0, std::fstream::end);
+        response_header.content_length = (int)requested_file.tellg();
+        requested_file.seekg(0, std::fstream::beg);
+
+        // send the head of response.
+        auto response_header_str = SimpleServer::header_to_str(response_header);
+        send_message(connection, response_header_str.c_str(), response_header_str.length());
+
+        // send body of response.
+        char response_body[1000];
+        memset(response_body, 0, 1000);
+        while(requested_file){
+            requested_file.read(response_body, 999);
+            send_message(connection, response_body, strlen(response_body));
+        }
+        requested_file.close();
+
+    }
+
     return 0;
 }
 
@@ -75,7 +121,7 @@ int SimpleServer::process_request(const ConnectionInfo &connection, int buffer_s
     // Receive the header for request.
     // buffer is used to recive data over the network.
     char header[8000], buffer[buffer_size];
-    char* body = NULL;
+    memset(header, 0, 8000);
 
     // recv request header.
 
@@ -83,6 +129,7 @@ int SimpleServer::process_request(const ConnectionInfo &connection, int buffer_s
     bool cont_recv = true;
 
     while(cont_recv){
+        memset(buffer, 0, buffer_size);
         bytes_recvd  = recv(connection.file_descriptor, buffer, buffer_size, 0);
         if(bytes_recvd < 0){
             // something went wrong while reciving bytes
@@ -107,13 +154,7 @@ int SimpleServer::process_request(const ConnectionInfo &connection, int buffer_s
     }
 
     header[header_len] = 0;
-    printf("%s", header);
     process_GET(connection, header, header_len);
-
-    if(body != NULL){
-        // delete body if the request had a body.
-        delete [] body;
-    }
 
     return 0;
 }
@@ -123,11 +164,12 @@ int SimpleServer::serve() {
         return -1;
     }
 
-    ConnectionInfo connection;
+
     while(true){
-        connection = accept_connection();
+        ConnectionInfo connection = accept_connection();
         process_request(connection);
         close(connection.file_descriptor);
+        break;
     }
     return 0;
 }
@@ -160,4 +202,32 @@ void SimpleServer::hex_dump(const char *buffer, int buffer_len){
         current_byte++;
     }
     printf("\n");
+}
+
+Header SimpleServer::parse_header(std::string header, int header_len){
+    auto lines = split(header, "\r\n");
+    Header parsed_header;
+
+    bool is_request_header = true;
+    if(is_request_header){
+        auto param = split(lines[0], " ");
+        parsed_header.method = param[0];
+        parsed_header.resource_name = param[1];
+        parsed_header.version = param[2];
+    }
+
+    return parsed_header;
+}
+
+std::string SimpleServer::header_to_str(Header header){
+    std::string header_str = "";
+    bool is_request = false;
+    if(!is_request){
+        header_str = header.version + " " + std::to_string(header.status) + " " + header.msg + "\r\n";
+    }
+
+    header_str += "Content-Length: " + std::to_string(header.content_length) + "\r\n";
+    header_str += "\r\n";
+
+    return header_str;
 }

@@ -1,9 +1,20 @@
 #pragma once
 #include <netinet/in.h>
+#include <string>
 
 struct ConnectionInfo {
     int file_descriptor;
     struct sockaddr_in address;
+};
+
+
+struct Header{
+    std::string method;
+    std::string resource_name;
+    std::string version;
+    std::string msg;
+    int status;
+    int content_length;
 };
 
 class SimpleServer {
@@ -19,6 +30,8 @@ class SimpleServer {
 
     public:
         static void hex_dump(const char* buffer, int buffer_len);
+        static Header parse_header(std::string header, int header_len);
+        static std::string header_to_str(Header header);
         SimpleServer(const char* ip_address, int port, int backlog);
         int init();
         int serve();

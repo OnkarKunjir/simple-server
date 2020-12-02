@@ -13,6 +13,7 @@ struct Header{
     std::string resource_name;
     std::string version;
     std::string msg;
+    std::string content_type;
     int status;
     int content_length;
 };

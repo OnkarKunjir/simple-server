@@ -75,15 +75,29 @@ void SimpleServer::send_message(const ConnectionInfo &connection, const char* me
 int SimpleServer::process_GET(const ConnectionInfo &connection, const char* request_header, int header_len){
     // function to process get request.
 
-    char response_body[] = "Hello World";
-
     Header parsed_header = parse_header(request_header, header_len);
 
     // generate response.
     Header response_header;
     response_header.version = "HTTP/1.0";
 
-    std::string file_path = "demo.html";
+    std::string file_path;
+    if(parsed_header.resource_name == "/"){
+        file_path = "./public/index.html";
+        response_header.content_type = "text/html";
+    }
+    else{
+        auto path_parts = split(parsed_header.resource_name, "/");
+        auto resourse_parts = split(path_parts[path_parts.size()-1], ".");
+        std::string extension = resourse_parts[resourse_parts.size()-1];
+        if(extension == "jpg")
+            response_header.content_type = "image/jpeg";
+        else if(extension == "html")
+            response_header.content_type = "text/html";
+
+        file_path = "./public" + parsed_header.resource_name;
+    }
+    printf("requesting %s\n", file_path.c_str());
     std::fstream requested_file(file_path.c_str(), std::fstream::in | std::fstream::binary);
 
 
@@ -100,14 +114,28 @@ int SimpleServer::process_GET(const ConnectionInfo &connection, const char* requ
         send_message(connection, response_header_str.c_str(), response_header_str.length());
 
         // send body of response.
-        char response_body[1000];
-        memset(response_body, 0, 1000);
-        while(requested_file){
-            requested_file.read(response_body, 999);
-            send_message(connection, response_body, strlen(response_body));
-        }
-        requested_file.close();
+        char response_body[response_header.content_length+1];
+        memset(response_body, 0, response_header.content_length+1);
 
+        while(requested_file){
+            requested_file.read(response_body, response_header.content_length+1);
+            send_message(connection, response_body, response_header.content_length);
+        }
+
+        requested_file.close();
+    }
+    else{
+        char response_body[] = "404 File Not Found!";
+
+        response_header.status = 404;
+        response_header.msg = "Not Found";
+        response_header.content_type = "text/html";
+        response_header.content_length = strlen(response_body);
+        // send the head of response.
+        auto response_header_str = SimpleServer::header_to_str(response_header);
+        send_message(connection, response_header_str.c_str(), response_header_str.length());
+
+        send_message(connection, response_body, strlen(response_body));
     }
 
     return 0;
@@ -169,7 +197,6 @@ int SimpleServer::serve() {
         ConnectionInfo connection = accept_connection();
         process_request(connection);
         close(connection.file_descriptor);
-        break;
     }
     return 0;
 }
@@ -226,6 +253,9 @@ std::string SimpleServer::header_to_str(Header header){
         header_str = header.version + " " + std::to_string(header.status) + " " + header.msg + "\r\n";
     }
 
+    if(header.content_type.length() > 0){
+        header_str += "Content-Type: " + header.content_type + "\r\n";
+    }
     header_str += "Content-Length: " + std::to_string(header.content_length) + "\r\n";
     header_str += "\r\n";
 

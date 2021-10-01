@@ -1,0 +1,4 @@
+#+title: Simple Server
+#+author: Onkar Kunjir
+
+Simple server is a http server built using c socket. This branch rewrote orignal server in C and has functionality to live relod.

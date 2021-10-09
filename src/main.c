@@ -1,6 +1,9 @@
+#include "server.h"
 #include <stdio.h>
 
 int main() {
-  printf("hello world\n");
+  serverInit("127.0.0.1", 8080);
+  serverProcessClient();
+  serverStop();
   return 0;
 }

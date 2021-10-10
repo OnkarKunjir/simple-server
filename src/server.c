@@ -24,12 +24,43 @@ typedef struct Socket {
 
 char serverBuffer[BUFFER_SIZE];
 Socket server;
+HashMap mimetype;
+const char response_header_template[] = "HTTP/1.1 %d %s\r\n"
+                                        "content-type: %s\r\n"
+                                        "content-length: %zu\r\n"
+                                        "server: custom-boi\r\n"
+                                        "\r\n";
 
-/**
- * Function to receive the infromation form client. Stores into serverBuffer
- */
-unsigned int serverRecv();
-void serverParseHeader();
+void serverInitMime();
+unsigned long int hash(char *str);
+int compare(char *a, char *b);
+unsigned int serverRecv(const Socket *client);
+HashMap serverParseHeader();
+unsigned int serverSend(const Socket *client, HashMap *header);
+
+void serverInitMime() {
+  mimetype = hmapCreate((int (*)(void *, void *))compare,
+                        (unsigned long int (*)(void *))hash, 20);
+  hmapSet(&mimetype, "html", "text/html; charset=utf-8");
+  hmapSet(&mimetype, "txt", "text/plain; charset=utf-8");
+  hmapSet(&mimetype, "js", "application/javascript; charset=utf-8");
+
+  hmapSet(&mimetype, "jpeg", "image/jpeg");
+  hmapSet(&mimetype, "jpg", "image/jpeg");
+  hmapSet(&mimetype, "png", "image/png");
+}
+
+unsigned long int hash(char *str) {
+  unsigned int hash = 5381;
+  int c;
+
+  while ((c = *str++))
+    hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+
+  return hash;
+}
+
+int compare(char *a, char *b) { return !strcmp(a, b); }
 
 unsigned int serverRecv(const Socket *client) {
   memset(serverBuffer, 0, BUFFER_SIZE);
@@ -37,10 +68,7 @@ unsigned int serverRecv(const Socket *client) {
   return size;
 }
 
-void serverParseHeader() {
-  char *header_end = strstr(serverBuffer, "\r\n\r\n");
-  unsigned int header_len = header_end - serverBuffer;
-
+HashMap serverParseHeader() {
   Vector lines = vectorCreate(20);
   char *line = strtok(serverBuffer, "\r\n");
   while (line) {
@@ -48,15 +76,62 @@ void serverParseHeader() {
     line = strtok(NULL, "\r\n");
   }
 
+  HashMap header = hmapCreate((int (*)(void *, void *))compare,
+                              (unsigned long int (*)(void *))hash, 20);
+
+  hmapSet(&header, "method", strtok(serverBuffer, " "));
+  hmapSet(&header, "url", strtok(NULL, " "));
+  hmapSet(&header, "version", strtok(NULL, " "));
+
   for (size_t i = 1; i < lines.length; i++) {
     char *sep = strchr(lines.data[i], ':');
     *sep = 0;
     char *key = lines.data[i];
     char *value = sep + 1;
-    printf("%s : %s\n", key, value);
+    hmapSet(&header, key, value);
   }
 
   vectorDestroy(&lines);
+  return header;
+}
+
+unsigned int serverSend(const Socket *client, HashMap *header) {
+  // read file and send it's contents.
+  char *filename = hmapGet(header, "url") + 1;
+  if (*filename == 0)
+    filename = "index.html";
+
+  FILE *response = fopen(filename, "r");
+  if (response != NULL) {
+    fseek(response, 0, SEEK_END);
+    size_t size = ftell(response);
+    rewind(response);
+    unsigned char response_buffer[size];
+    fread(response_buffer, sizeof(unsigned char), size, response);
+    fclose(response);
+
+    // generate response header.
+
+    filename = strrchr(filename, '.');
+    if (filename != NULL)
+      filename++;
+    else
+      filename = "txt";
+
+    char response_header[BUFFER_SIZE];
+    size_t len = sprintf(response_header, response_header_template, 200, "OK",
+                         (char *)hmapGet(&mimetype, filename), size);
+
+    send(client->sock_fd, response_header, len, 0);
+    send(client->sock_fd, response_buffer, size, 0);
+  } else {
+    char response_header[BUFFER_SIZE];
+    size_t len = sprintf(response_header, response_header_template, 404,
+                         "Not Found", "", 0l);
+    send(client->sock_fd, response_header, len, 0);
+  }
+
+  return 0;
 }
 
 // functions from header file.
@@ -94,6 +169,7 @@ void serverInit(const char *address, unsigned short port) {
   if (listen(server.sock_fd, BACKLOG) == -1) {
     perror("Failed to listend\n");
   }
+  serverInitMime();
 }
 
 void serverProcessClient() {
@@ -103,8 +179,14 @@ void serverProcessClient() {
                           (socklen_t *)&address_len);
   serverPrintInfo(&client);
   serverRecv(&client);
-  serverParseHeader();
+  HashMap header = serverParseHeader();
+  serverSend(&client, &header);
+
+  hmapDestroy(&header);
   close(client.sock_fd);
 }
 
-void serverStop() { close(server.sock_fd); }
+void serverStop() {
+  hmapDestroy(&mimetype);
+  close(server.sock_fd);
+}
